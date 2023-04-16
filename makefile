@@ -4,7 +4,8 @@ EXECUTABLE:=$(BUILDDIR)/basketballer
 # EXEC_CMD ?= 
 # EXEC_ARGV ?= 
 
-CFLAGS += -MD -Iinclude
+CFLAGS := $(CFLAGS) -MD -Iinclude $(shell pkg-config sdl2 --cflags)
+LDFLAGS := $(LDFLAGS) $(shell pkg-config sdl2 --libs)
 
 SOURCES=$(wildcard $(SOURCEDIR)/*.c)
 OBJECTS=$(patsubst %.c,$(BUILDDIR)/%.o,$(notdir $(SOURCES)))
