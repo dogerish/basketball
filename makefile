@@ -1,8 +1,7 @@
 SOURCEDIR=./src
 BUILDDIR=./build
 EXECUTABLE:=$(BUILDDIR)/basketballer
-# EXEC_CMD ?= 
-# EXEC_ARGV ?= 
+RUNCMD ?= $<
 
 CFLAGS := $(CFLAGS) -MD -Iinclude $(shell pkg-config sdl2 --cflags)
 LDFLAGS := $(LDFLAGS) $(shell pkg-config sdl2 --libs)
@@ -10,26 +9,23 @@ LDFLAGS := $(LDFLAGS) $(shell pkg-config sdl2 --libs)
 SOURCES=$(wildcard $(SOURCEDIR)/*.c)
 OBJECTS=$(patsubst %.c,$(BUILDDIR)/%.o,$(notdir $(SOURCES)))
 
-.PHONY: all run
-all: $(EXECUTABLE)
-run: $(EXECUTABLE)
-	exec $(EXEC_CMD) $(EXECUTABLE) $(EXEC_ARGV)
-
 $(EXECUTABLE): $(OBJECTS)
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $(EXECUTABLE)
+	$(LINK.o) $^ $(LOADLIBES) $(LDLIBS) $(OUTPUT_OPTION)
 
 $(OBJECTS): | $(BUILDDIR)
 
 $(BUILDDIR):
-	mkdir $@
+	mkdir -p $@
 
 $(BUILDDIR)/%.o: $(SOURCEDIR)/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(COMPILE.c) $(OUTPUT_OPTION) $<
 
 -include $(OBJECTS:.o=.d)
 
-.PHONY: clean purge
+.PHONY: run clean purge
+run: $(EXECUTABLE)
+	$(RUNCMD)
 clean:
-	rm $(OBJECTS)
+	rm -f $(BUILDDIR)/*.o $(BUILDDIR)/*.d
 purge:
 	rm -rf $(BUILDDIR)
