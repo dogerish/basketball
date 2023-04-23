@@ -1,7 +1,9 @@
-#include "stdio.h"
-#include "SDL2/SDL.h"
+#include <stdio.h>
+#include <time.h>
+#include <SDL2/SDL.h>
 #include "textures.h"
 #include "entity.h"
+#include "physics.h"
 
 enum ExitCode
 {
@@ -12,6 +14,7 @@ enum ExitCode
 };
 
 #define OHNO(context) SDL_LogError(SDL_LOG_CATEGORY_ASSERT, context " (%s:%i, %s)\n", __FILE__, __LINE__, SDL_GetError());
+#define TIMESPEC_TO_DOUBLE(ts) ((double) ts.tv_sec + (double) ts.tv_nsec / 1e9)
 
 int main(int argc, char* argv[])
 {
@@ -58,49 +61,79 @@ int main(int argc, char* argv[])
     netrect.x -= netrect.w / 2;
     SDL_Rect screenrect = { 0, 0, w, h };
 
-    SDL_FPoint bballspawn = { bballrect.x, bballrect.y };
-    entity bballent = { bballspawn, 0, 0, 0, 0 };
+    vec3d bballspawn = { bballrect.x, bballrect.y, 1 };
+    bballspawn.x = screen_to_world(bballspawn.x, bballspawn.z);
+    bballspawn.y = screen_to_world(bballspawn.y, bballspawn.z);
+#define MAXBBALLS 25
+    entity bballs[MAXBBALLS];
+    entity spawnball = {
+        .pos = bballspawn,
+        .vel = { 0, 0, 0 },
+        .acc = { 0, 0, 0 },
+        .dim = { 0.25, 0.25, 0.25 },
+        .coef_rest = 0.75
+    };
+    entity* bballent = bballs;
 
     // main loop
     int running = 1;
-    int ballIsHeld = 1;
-    int ballInNet = 0;
+    char flyingbballs[MAXBBALLS] = { 0 };
+    char netbballs[MAXBBALLS] = { 0 };
     int score = 0;
+    struct timespec lasttick;
+    clock_gettime(CLOCK_MONOTONIC, &lasttick);
+    struct timespec ticks;
+    clock_gettime(CLOCK_MONOTONIC, &ticks);
+    double dt = 0;
     while (running)
     {
-        // gravity
-        entityApplyForce(&bballent, 0, 0.5);
-
-        // respawn ball if out of screen (except if above screen)
-        if (!SDL_HasIntersection(&bballrect, &screenrect) &&
-            bballrect.y + bballrect.h >= screenrect.y)
+        for (int i = 0; i < MAXBBALLS; i++)
         {
-            bballent.pos = bballspawn;
-            ballIsHeld = 1;
-            bballent.vel.x = 0;
-            bballent.vel.y = 0;
-        }
+            if (!flyingbballs[i]) continue;
+            bballent = bballs + i;
 
-        if (SDL_HasIntersection(&bballrect, &netrect))
-        {
-            if (!ballInNet && bballent.vel.y > 0)
+            // gravity
+            entityApplyForce(bballent, 0, GRAVITY, 0);
+
+            // respawn ball at horizontal screen edges
+            entityUpdateRect(bballent, &bballrect);
+            if (bballrect.x + bballrect.w <= screenrect.x ||
+                bballrect.x >= screenrect.x + screenrect.w)
             {
-                // x intersection with the top edge of the net rectangle, 
-                // assuming it crossed from over net to inside net
-                float bx = bballent.pos.x + bballrect.w / 2,
-                      by = bballent.pos.y + bballrect.h / 2;
-                float xint = bx + bballent.vel.x / bballent.vel.y * (netrect.y - by);
-                if (xint > netrect.x && xint < netrect.x + netrect.w)
+                *bballent = spawnball;
+                flyingbballs[i] = 0;
+            }
+            // bounce ball at bottom of screen
+            else if (bballrect.y + bballrect.h >= screenrect.y + screenrect.h)
+            {
+                bballent->pos.y = screen_to_world(screenrect.y + screenrect.h - bballrect.h, bballent->pos.z);
+                // apply bounce
+                if (bballent->vel.y > 0.1f) bballent->vel.y *= -bballent->coef_rest;
+                // cancel gravity
+                else entityApplyForce(bballent, 0, -GRAVITY, 0);
+            }
+
+            if (SDL_HasIntersection(&bballrect, &netrect))
+            {
+                if (!netbballs[i] && bballent->vel.y > 0)
                 {
-                    ballInNet = 1;
-                    score++;
-                    printf("Score: %i\n", score);
+                    // x intersection with the top edge of the net rectangle, 
+                    // assuming it crossed from over net to inside net
+                    float bx = bballrect.x + bballrect.w / 2,
+                          by = bballrect.y + bballrect.h / 2;
+                    float xint = bx + world_to_screen(bballent->vel.x, bballent->pos.z) / world_to_screen(bballent->vel.y, bballent->pos.z) * (netrect.y - by);
+                    if (xint > netrect.x && xint < netrect.x + netrect.w)
+                    {
+                        netbballs[i] = 1;
+                        score++;
+                        printf("Score: %i\n", score);
+                    }
                 }
             }
-        }
-        else if (ballInNet)
-        {
-            ballInNet = 0;
+            else if (netbballs[i])
+            {
+                netbballs[i] = 0;
+            }
         }
 
         // event loop
@@ -112,41 +145,67 @@ int main(int argc, char* argv[])
                 running = 0;
                 break;
             case SDL_MOUSEBUTTONDOWN:
-                if (!ballIsHeld) break;
-                ballIsHeld = 0;
-                float x = (float) (e.button.x - bballent.pos.x) / 10;
-                float y = (float) (e.button.y - bballent.pos.y) / 10;
-                entityApplyForce(&bballent, x, y);
+                // throw next non-flying basketball
+                for (int i = 0; i < MAXBBALLS; i++)
+                {
+                    if (flyingbballs[i]) continue;
+
+                    flyingbballs[i] = 1;
+                    entityUpdateRect(bballent = bballs + i, &bballrect);
+                    float x = screen_to_world((e.button.x - bballrect.x)/dt*5, bballent->pos.z);
+                    float y = screen_to_world((e.button.y - bballrect.y)/dt*5, bballent->pos.z);
+                    entityApplyForce(bballent, x, y, 0);
+                    break;
+                }
                 break;
             }
         }
-        if (ballIsHeld) entityApplyForce(&bballent, 0, -0.5);
-
-        // update ball
-        entityUpdate(&bballent);
-        bballrect.x = bballent.pos.x;
-        bballrect.y = bballent.pos.y;
+        for (int i = 0; i < MAXBBALLS; i++)
+        {
+            if (!flyingbballs[i]) continue;
+            bballent = bballs + i;
+            // update ball
+            entityUpdate(bballent, dt);
+            entityUpdateRect(bballent, &bballrect);
+        }
 
         // render background
-        SDL_SetRenderDrawColor(ren, ballInNet*100, 100, 255, 255);
+        SDL_SetRenderDrawColor(ren, 0, 100, 255, 255);
         SDL_RenderClear(ren);
 
-        // render textures
+        // draw person
         SDL_RenderCopy(ren, person, NULL, &personrect);
-        if (ballIsHeld)
-        {
-            SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
-            int x, y;
-            SDL_GetMouseState(&x, &y);
-            SDL_RenderDrawLine(ren, bballrect.x, bballrect.y, x, y);
-        }
+
+        // draw guidance line
+        SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
+        int x, y;
+        SDL_GetMouseState(&x, &y);
+        SDL_RenderDrawLine(ren, world_to_screen(spawnball.pos.x, spawnball.pos.z), world_to_screen(spawnball.pos.y, spawnball.pos.z), x, y);
+
+        // draw hoop and basketballs
         SDL_RenderCopy(ren, hoop, NULL, &hooprect);
-        /* SDL_SetRenderDrawColor(ren, 0, 0, 0, 255); */
-        /* SDL_RenderDrawRect(ren, &netrect); */
-        SDL_RenderCopy(ren, basketball, NULL, &bballrect);
+        for (int i = 0, h = 0; i < MAXBBALLS; i++)
+        {
+            // only draw up to one non-flying ball
+            if (!flyingbballs[i] && h) continue;
+            else if (!flyingbballs[i])
+            {
+                h = 1;
+                bballent = &spawnball;
+            }
+            else bballent = bballs + i;
+
+            entityUpdateRect(bballent, &bballrect);
+            SDL_RenderCopy(ren, basketball, NULL, &bballrect);
+        }
 
         SDL_RenderPresent(ren);
         SDL_Delay(15);
+        clock_gettime(CLOCK_MONOTONIC, &ticks);
+        dt = TIMESPEC_TO_DOUBLE(ticks) - TIMESPEC_TO_DOUBLE(lasttick);
+        clock_gettime(CLOCK_MONOTONIC, &lasttick);
+        printf("%04.01f fps\r", 1/dt);
+        fflush(stdout);
     }
 
     // exit
