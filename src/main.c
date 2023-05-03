@@ -34,7 +34,8 @@ SDL_Texture* person = NULL;
 SDL_Texture* basketball = NULL;
 SDL_Texture* hoop = NULL;
 SOUND_track bounce_sound = { 0 };
-SOUND_track score_sound = { .pos = NULL, .len = 0, .vol = SDL_MIX_MAXVOLUME };
+SOUND_track score_sound = { .pos = NULL, .len = 0, .vol = SDL_MIX_MAXVOLUME, .rep = SOUND_TRACK_REPEAT_NEVER };
+SOUND_track basketbeat = { .pos = NULL, .len = 0, .vol = SDL_MIX_MAXVOLUME, .rep = SOUND_TRACK_REPEAT_ALWAYS };
 
 void quit(QuitLevel level)
 {
@@ -45,8 +46,9 @@ void quit(QuitLevel level)
     case QUIT_AUDIO:
         SOUND_CloseDevice();
     case QUIT_WAV:
-        if (bounce_sound.pos) SDL_FreeWAV(bounce_sound.pos);
-        if (score_sound.pos) SDL_FreeWAV(score_sound.pos);
+        if (bounce_sound.buf) SDL_FreeWAV(bounce_sound.buf);
+        if (score_sound.buf) SDL_FreeWAV(score_sound.buf);
+        if (basketbeat.buf) SDL_FreeWAV(basketbeat.buf);
     case QUIT_TEXTURES:
         if (person) SDL_DestroyTexture(person);
         if (basketball) SDL_DestroyTexture(basketball);
@@ -121,12 +123,15 @@ int main(int argc, char* argv[])
 
     // load audio tracks
     if (SOUND_LoadWAV("sounds/bounce.wav", &bounce_sound) < 0 ||
-        SOUND_LoadWAV("sounds/score.wav", &score_sound) < 0)
+        SOUND_LoadWAV("sounds/score.wav", &score_sound) < 0 ||
+        SOUND_LoadWAV("sounds/basketbeat.wav", &basketbeat) < 0)
     {
         OHNO("Failed to load sound");
         quit(QUIT_WAV);
         return EX_ENOWAV;
     }
+    // start playing background music
+    SOUND_Play(basketbeat);
 
     // set up audio
     if (SOUND_OpenDevice())

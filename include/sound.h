@@ -1,10 +1,18 @@
 #pragma once
 #include <SDL2/SDL.h>
 
+typedef enum {
+    SOUND_TRACK_REPEAT_NEVER = 0,
+    SOUND_TRACK_REPEAT_ALWAYS = 1
+} SOUND_TRACK_repeat;
+
 typedef struct {
-    Uint8* pos;
+    Uint8* buf;
     Uint32 len;
     Uint8  vol; // volume, 0-128
+    SOUND_TRACK_repeat rep;
+
+    Uint8* pos;
 } SOUND_track;
 
 // plays a track if there's a space for one. if not, returns -1; 0 on success
